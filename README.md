@@ -17,7 +17,7 @@ This project should be considered in beta status. We run it in production at [Wa
   1. Install the package
 
   ```
-  yarn add @rolandpeelen/rewatch
+  yarn add @endosama/rewatch
   ```
 
   2. Build / Clean / Watch
