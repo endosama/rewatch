@@ -253,26 +253,39 @@ pub fn read_dependency(
     project_root: &str,
     workspace_root: &Option<String>,
 ) -> Result<String, String> {
-    let path_from_parent = PathBuf::from(helpers::package_path(parent_path, package_name));
-    let path_from_project_root = PathBuf::from(helpers::package_path(project_root, package_name));
-    let maybe_path_from_workspace_root = workspace_root
-        .as_ref()
-        .map(|workspace_root| PathBuf::from(helpers::package_path(workspace_root, package_name)));
+    // Collect all potential starting directories for module resolution
+    let mut start_dirs = vec![parent_path, project_root];
+    if let Some(workspace_root) = workspace_root {
+        start_dirs.push(workspace_root);
+    }
+    
+    // Use Node.js-style module resolution with directory traversal
+    let path = match helpers::resolve_package_path_multi(&start_dirs, package_name) {
+        Some(resolved_path) => Ok(resolved_path),
+        None => {
+            // Fallback to the old behavior for backwards compatibility
+            let path_from_parent = PathBuf::from(helpers::package_path(parent_path, package_name));
+            let path_from_project_root = PathBuf::from(helpers::package_path(project_root, package_name));
+            let maybe_path_from_workspace_root = workspace_root
+                .as_ref()
+                .map(|workspace_root| PathBuf::from(helpers::package_path(workspace_root, package_name)));
 
-    let path = match (
-        path_from_parent,
-        path_from_project_root,
-        maybe_path_from_workspace_root,
-    ) {
-        (path_from_parent, _, _) if path_from_parent.exists() => Ok(path_from_parent),
-        (_, path_from_project_root, _) if path_from_project_root.exists() => Ok(path_from_project_root),
-        (_, _, Some(path_from_workspace_root)) if path_from_workspace_root.exists() => {
-            Ok(path_from_workspace_root)
+            match (
+                path_from_parent,
+                path_from_project_root,
+                maybe_path_from_workspace_root,
+            ) {
+                (path_from_parent, _, _) if path_from_parent.exists() => Ok(path_from_parent),
+                (_, path_from_project_root, _) if path_from_project_root.exists() => Ok(path_from_project_root),
+                (_, _, Some(path_from_workspace_root)) if path_from_workspace_root.exists() => {
+                    Ok(path_from_workspace_root)
+                }
+                _ => Err(format!(
+                    "The package \"{}\" is not found (are node_modules up-to-date?)...",
+                    package_name
+                )),
+            }
         }
-        _ => Err(format!(
-            "The package \"{}\" is not found (are node_modules up-to-date?)...",
-            package_name
-        )),
     }?;
 
     let canonical_path = match path.canonicalize() {
