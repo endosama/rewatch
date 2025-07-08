@@ -555,7 +555,25 @@ fn get_dependency_paths(
             let dependency_path = if let Some(packages) = packages {
                 packages.get(package_name).map(|package| package.path.to_string())
             } else {
-                packages::read_dependency(package_name, project_root, project_root, workspace_root).ok()
+                // Use the new Node.js-style module resolution
+                let start_dirs = match workspace_root {
+                    Some(workspace_root) => vec![project_root, workspace_root],
+                    None => vec![project_root],
+                };
+                
+                match helpers::resolve_package_path_multi(&start_dirs, package_name) {
+                    Some(resolved_path) => {
+                        // Try to canonicalize the path
+                        match resolved_path.canonicalize() {
+                            Ok(canonical_path) => Some(canonical_path.to_string_lossy().to_string()),
+                            Err(_) => None,
+                        }
+                    }
+                    None => {
+                        // Fallback to the old method for backwards compatibility
+                        packages::read_dependency(package_name, project_root, project_root, workspace_root).ok()
+                    }
+                }
             }
             .map(|canonicalized_path| {
                 vec![

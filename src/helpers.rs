@@ -64,6 +64,47 @@ pub fn package_path(root: &str, package_name: &str) -> String {
     format!("{}/node_modules/{}", root, package_name)
 }
 
+/// Resolves a package following Node.js module resolution algorithm
+/// Traverses up the directory tree looking for the package in node_modules directories
+pub fn resolve_package_path(start_dir: &str, package_name: &str) -> Option<PathBuf> {
+    let mut current_dir = PathBuf::from(start_dir);
+    
+    // First, make sure we have an absolute path
+    if current_dir.is_relative() {
+        if let Ok(abs_path) = current_dir.canonicalize() {
+            current_dir = abs_path;
+        }
+    }
+    
+    loop {
+        let node_modules_path = current_dir.join("node_modules").join(package_name);
+        
+        // Check if the package exists in this node_modules directory
+        if node_modules_path.exists() {
+            return Some(node_modules_path);
+        }
+        
+        // Move up one directory level
+        match current_dir.parent() {
+            Some(parent) => current_dir = parent.to_path_buf(),
+            None => break, // Reached the root directory
+        }
+    }
+    
+    None
+}
+
+/// Resolves a package following Node.js module resolution algorithm with multiple starting points
+/// This is used when we have multiple potential starting directories (parent, project root, workspace root)
+pub fn resolve_package_path_multi(start_dirs: &[&str], package_name: &str) -> Option<PathBuf> {
+    for start_dir in start_dirs {
+        if let Some(path) = resolve_package_path(start_dir, package_name) {
+            return Some(path);
+        }
+    }
+    None
+}
+
 pub fn get_abs_path(path: &str) -> String {
     let abs_path_buf = PathBuf::from(path);
 
@@ -367,4 +408,87 @@ pub fn get_source_file_from_rescript_file(path: &Path, suffix: &str) -> PathBuf 
         // suffix.to_string includes the ., so we need to remove it
         &suffix.to_string()[1..],
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_resolve_package_path_traversal() {
+        // Create a temporary directory structure for testing
+        let temp_dir = std::env::temp_dir().join("rewatch_test_module_resolution");
+        let _ = fs::remove_dir_all(&temp_dir);
+
+        let project_deep = temp_dir.join("project").join("sub").join("deep");
+        fs::create_dir_all(&project_deep).unwrap();
+        
+        let top_level_package = temp_dir.join("node_modules").join("top-level-package");
+        fs::create_dir_all(&top_level_package).unwrap();
+
+        // Test that we can find the package from deep directory
+        let found_path = resolve_package_path(
+            &project_deep.to_string_lossy(),
+            "top-level-package"
+        );
+        
+        assert!(found_path.is_some());
+        assert!(found_path.unwrap().ends_with("top-level-package"));
+
+        // Clean up
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_resolve_package_path_multi() {
+        // Create a temporary directory structure for testing
+        let temp_dir = std::env::temp_dir().join("rewatch_test_multi_resolution");
+        let _ = fs::remove_dir_all(&temp_dir);
+
+        let project_a = temp_dir.join("project_a");
+        fs::create_dir_all(&project_a).unwrap();
+        
+        let project_b = temp_dir.join("project_b");
+        fs::create_dir_all(&project_b).unwrap();
+
+        let package_in_b = project_b.join("node_modules").join("test-package");
+        fs::create_dir_all(&package_in_b).unwrap();
+
+        // Test that we can find the package from multiple start directories
+        let project_a_str = project_a.to_string_lossy().to_string();
+        let project_b_str = project_b.to_string_lossy().to_string();
+        let start_dirs = vec![
+            project_a_str.as_str(),
+            project_b_str.as_str(),
+        ];
+        
+        let found_path = resolve_package_path_multi(&start_dirs, "test-package");
+        
+        assert!(found_path.is_some());
+        assert!(found_path.unwrap().ends_with("test-package"));
+
+        // Clean up
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_resolve_package_path_not_found() {
+        // Test that we return None when package is not found
+        let temp_dir = std::env::temp_dir().join("rewatch_test_not_found");
+        let _ = fs::remove_dir_all(&temp_dir);
+
+        let project_dir = temp_dir.join("project");
+        fs::create_dir_all(&project_dir).unwrap();
+
+        let found_path = resolve_package_path(
+            &project_dir.to_string_lossy(),
+            "non-existent-package"
+        );
+        
+        assert!(found_path.is_none());
+
+        // Clean up
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
 }
